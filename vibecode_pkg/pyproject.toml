@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibecode"
+version = "0.1.0"
+description = "MCP server for Claude-Code with automatic Cloudflare tunneling"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+keywords = ["mcp", "claude", "ai", "cloudflare", "tunnel"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+dependencies = [
+    "mcp-claude-code>=0.1.0",
+    "requests>=2.31.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/vibecode"
+Documentation = "https://github.com/yourusername/vibecode#readme"
+Repository = "https://github.com/yourusername/vibecode.git"
+Issues = "https://github.com/yourusername/vibecode/issues"
+
+[project.scripts]
+vibecode = "vibecode.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vibecode*"]
+
+[tool.setuptools.package-data]
+vibecode = ["py.typed"]
