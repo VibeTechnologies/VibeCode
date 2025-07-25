@@ -1,0 +1,87 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install cloudflared
+      run: |
+        # Download cloudflared
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        cloudflared --version
+    
+    - name: Install vibecode package
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+    
+    - name: Test vibecode CLI availability
+      run: |
+        vibecode --help
+        vibecode start --help
+    
+    - name: Run pytest integration tests
+      run: |
+        python -m pytest tests/test_integration.py -v
+    
+    - name: Test vibecode start integration
+      timeout-minutes: 2
+      run: |
+        # Start vibecode in background and capture output
+        timeout 60s vibecode start --port 8333 > output.log 2>&1 &
+        VIBECODE_PID=$!
+        
+        # Wait for startup and tunnel creation
+        echo "Waiting for tunnel creation..."
+        sleep 30
+        
+        # Check if process is still running
+        if ! kill -0 $VIBECODE_PID 2>/dev/null; then
+          echo "❌ vibecode process died unexpectedly"
+          cat output.log
+          exit 1
+        fi
+        
+        # Check output for required elements
+        echo "Checking output..."
+        cat output.log
+        
+        # Verify MCP server started
+        if ! grep -q "Starting MCP server" output.log; then
+          echo "❌ MCP server startup message not found"
+          exit 1
+        fi
+        
+        # Verify cloudflare tunnel creation
+        if ! grep -q "trycloudflare.com" output.log; then
+          echo "❌ Cloudflare tunnel URL not found"
+          exit 1
+        fi
+        
+        # Verify public URL display
+        if ! grep -q "Public URL:" output.log; then
+          echo "❌ Public URL message not found"  
+          exit 1
+        fi
+        
+        # Clean up
+        kill $VIBECODE_PID 2>/dev/null || true
+        wait $VIBECODE_PID 2>/dev/null || true
+        
+        echo "✅ Integration test passed!"
+        echo "Found MCP server startup, Cloudflare tunnel, and public URL"
