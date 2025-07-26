@@ -104,6 +104,7 @@ Expected: **17 tools** including `claude_code` (Claude Code CLI integration)
 3. Claude.ai will now establish a connection to your MCP server
 
 ![Successfully Added Connector](vibecode/docs/images/claude-connectors-step3.webp)
+![Permissions set](vibecode/docs/images/claude-connectors-step4.webp)
 
 ### What You Get
 

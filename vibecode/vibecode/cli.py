@@ -1,24 +1,19 @@
-import argparse
+# Suppress all warnings before any imports
+import warnings
 import os
+warnings.simplefilter("ignore")
+os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"
+
+import argparse
 import re
 import subprocess
 import sys
 import threading
 import time
 import uuid
-import warnings
 from typing import Tuple, Optional
 
-# Suppress common deprecation warnings for cleaner output
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", message=".*class-based.*config.*deprecated.*")
-warnings.filterwarnings("ignore", message=".*websockets.legacy.*deprecated.*")
-
-try:
-    from mcp_claude_code.server import ClaudeCodeServer
-except ImportError:
-    # Use mock for testing when mcp-claude-code is not available
-    from .mock_mcp import MockClaudeCodeServer as ClaudeCodeServer
+from mcp_claude_code.server import ClaudeCodeServer
 
 from .server import AuthenticatedMCPServer
 
@@ -44,6 +39,19 @@ def check_cloudflared() -> bool:
 
 def run_mcp_server(port: int, path: str, enable_auth: bool = True) -> None:
     """Run the Claude-Code MCP server (blocking)."""
+    import logging
+    
+    # Configure logging for cleaner output
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s: %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+    
+    # Suppress uvicorn startup messages
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    
     try:
         if enable_auth:
             # Create authenticated server with OAuth support
@@ -411,35 +419,21 @@ def print_tunnel_setup_guide() -> None:
 
 def print_instructions(url: str, enable_auth: bool = True) -> None:
     """Print setup instructions for the user."""
-    print("\n" + "="*60)
-    print("🚀 Claude-Code MCP server is running!")
-    print("="*60)
-    print(f"\n📡 Public URL: {url}")
+    print("\n" + "="*60, file=sys.stderr)
+    print("🚀 VibeCode MCP Server Ready", file=sys.stderr)
+    print("="*60, file=sys.stderr)
+    print(f"\n📡 URL: {url}", file=sys.stderr)
     
-    if enable_auth:
-        print("\n🔐 OAuth 2.1 Authentication Enabled")
-        base_url = url.rsplit('/', 1)[0]  # Remove UUID path
-        print("OAuth Endpoints:")
-        print(f"  • Authorization Server Metadata: {base_url}/.well-known/oauth-authorization-server")
-        print(f"  • Client Registration: {base_url}/register")
-        print(f"  • Authorization: {base_url}/authorize")
-        print(f"  • Token: {base_url}/token")
-    
-    print("\nTo use with Claude.ai:")
-    print("1. Copy the URL above")
-    print("2. Add it to your MCP configuration")
-    print("3. Set transport type to: sse")
-    if enable_auth:
-        print("4. Claude.ai will automatically handle OAuth authentication")
+    print("\n🔗 Add to Claude.ai:", file=sys.stderr)
+    print("  1. Copy the URL above", file=sys.stderr)
+    print("  2. Add as MCP server (transport: sse)", file=sys.stderr)
+    print("  3. Authentication handled automatically", file=sys.stderr)
     
     # Check if this is a quick tunnel (random domain)
     if "trycloudflare.com" in url:
-        print("\n⚠️  Note: This is a temporary tunnel that will expire when stopped.")
-        print("💡 For a persistent domain, use: vibecode tunnel setup")
-    else:
-        print("\n✅ Using persistent tunnel - domain will remain stable across restarts.")
+        print("\n💡 For persistent domain: vibecode tunnel setup", file=sys.stderr)
     
-    print("Press Ctrl+C to stop the server and tunnel.\n")
+    print("\nPress Ctrl+C to stop\n", file=sys.stderr)
 
 
 def main() -> None:
@@ -483,8 +477,7 @@ def main() -> None:
         
         # Start the MCP server in a daemon thread
         enable_auth = not args.no_auth
-        auth_msg = "with OAuth authentication" if enable_auth else "without authentication"
-        print(f"Starting server on port {args.port}...")
+        print(f"Starting MCP server on port {args.port}...", file=sys.stderr)
         server_thread = threading.Thread(
             target=run_mcp_server, 
             args=(args.port, uuid_path, enable_auth), 
@@ -515,11 +508,11 @@ def main() -> None:
                 # Determine tunnel strategy
                 if hasattr(args, 'quick') and args.quick:
                     # User explicitly wants quick tunnel
-                    print("🔄 Starting quick tunnel (random domain)...")
+                    print("Starting quick tunnel...", file=sys.stderr)
                     public_url, tunnel_process = start_tunnel(local_url, tunnel_name=None)
                 elif hasattr(args, 'tunnel') and args.tunnel:
                     # User specified a specific tunnel
-                    print(f"🔧 Using specified tunnel: {args.tunnel}")
+                    print(f"Using tunnel: {args.tunnel}", file=sys.stderr)
                     public_url, tunnel_process = start_tunnel(local_url, tunnel_name=args.tunnel)
                 else:
                     # Default: try to use persistent tunnel
@@ -536,18 +529,15 @@ def main() -> None:
                         # Try to use/create persistent tunnel
                         tunnel_name = ensure_tunnel_exists(cloudflared_cmd)
                         if tunnel_name:
-                            print(f"🌐 Using persistent tunnel: {tunnel_name}")
+                            print(f"Using persistent tunnel: {tunnel_name}", file=sys.stderr)
                             public_url, tunnel_process = start_tunnel(local_url, tunnel_name=tunnel_name)
                         else:
                             # Fall back to quick tunnel
-                            print("⚡ Falling back to quick tunnel...")
+                            print("Falling back to quick tunnel...", file=sys.stderr)
                             public_url, tunnel_process = start_tunnel(local_url, tunnel_name=None)
                     else:
                         # Not authenticated or no cloudflared, use quick tunnel
-                        if not cloudflared_cmd:
-                            print("⚡ Starting quick tunnel (cloudflared not found)...")
-                        else:
-                            print("⚡ Starting quick tunnel (run 'cloudflared tunnel login' for persistent domain)...")
+                        print("Starting quick tunnel...", file=sys.stderr)
                         public_url, tunnel_process = start_tunnel(local_url, tunnel_name=None)
                         
             except Exception as e:
@@ -555,6 +545,11 @@ def main() -> None:
                 sys.exit(1)
             
             full_public_url = f"{public_url}{uuid_path}"
+            
+            # Print URL to stdout for easy capture
+            print(full_public_url)
+            
+            # Print instructions to stderr
             print_instructions(full_public_url, enable_auth)
             
             try:
