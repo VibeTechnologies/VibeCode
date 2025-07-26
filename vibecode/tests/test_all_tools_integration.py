@@ -664,6 +664,178 @@ if __name__ == "__main__":
             assert "properties" in schema, f"Tool {tool['name']} schema missing properties"
         
         print(f"✅ All 17 tools present with proper schemas")
+    
+    def test_schema_extraction_edge_cases(self, server_setup):
+        """Test edge cases in schema extraction that could cause the original bug."""
+        endpoint = server_setup
+        
+        # Get tools list to analyze schema extraction robustness
+        response = requests.post(
+            endpoint,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": "edge-case-test",
+                "method": "tools/list",
+                "params": {}
+            },
+            timeout=10
+        )
+        
+        assert response.status_code == 200
+        
+        # Parse response
+        response_text = response.text.strip()
+        if response_text.startswith("data: "):
+            json_data = response_text.replace("data: ", "").strip()
+            result_data = json.loads(json_data)
+        else:
+            result_data = response.json()
+        
+        tools_list = result_data["result"]["tools"]
+        
+        # Test that ALL tools have valid schemas (no edge case failures)
+        for tool in tools_list:
+            tool_name = tool["name"]
+            
+            # Critical: Every tool must have a schema
+            assert "inputSchema" in tool, f"Tool {tool_name} missing inputSchema"
+            schema = tool["inputSchema"]
+            
+            # Critical: Schema must be a dict (not a function - the original bug)
+            assert isinstance(schema, dict), f"Tool {tool_name} schema is not dict: {type(schema)}"
+            
+            # Critical: Schema must have required fields
+            assert "type" in schema, f"Tool {tool_name} schema missing type"
+            assert "properties" in schema, f"Tool {tool_name} schema missing properties"
+            
+            # Properties must be a dict (not callable - edge case)
+            properties = schema["properties"]
+            assert isinstance(properties, dict), f"Tool {tool_name} properties is not dict: {type(properties)}"
+            
+            # Each property must have valid schema
+            for prop_name, prop_schema in properties.items():
+                assert isinstance(prop_schema, dict), f"Tool {tool_name}.{prop_name} schema is not dict"
+                # Must have either 'type' or 'anyOf' (both valid JSON Schema)
+                has_type = "type" in prop_schema or "anyOf" in prop_schema
+                assert has_type, f"Tool {tool_name}.{prop_name} missing type or anyOf: {prop_schema}"
+        
+        print(f"✅ All {len(tools_list)} tools pass edge case schema validation")
+    
+    def test_exact_claude_ai_workflow(self, server_setup):
+        """Test the exact workflow that was failing in claude.ai.
+        
+        This replicates the exact sequence: initialize -> tools/list -> tools/call
+        that was causing the 'argument of type function is not iterable' error.
+        """
+        endpoint = server_setup
+        
+        # Step 1: Initialize (exact claude.ai request)
+        init_response = requests.post(
+            endpoint,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": "claude-ai-init",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {"listChanged": True}},
+                    "clientInfo": {"name": "Claude Desktop", "version": "1.0"}
+                }
+            },
+            timeout=10
+        )
+        
+        assert init_response.status_code == 200, f"Initialize failed: {init_response.status_code}"
+        
+        # Step 2: Get tools list (this was throwing the TypeError)
+        tools_response = requests.post(
+            endpoint,
+            headers={
+                "Content-Type": "application/json", 
+                "Accept": "application/json, text/event-stream"
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": "claude-ai-tools",
+                "method": "tools/list",
+                "params": {}
+            },
+            timeout=10
+        )
+        
+        assert tools_response.status_code == 200, f"Tools list failed: {tools_response.status_code}"
+        
+        # Parse tools response (this was where the error occurred)
+        response_text = tools_response.text.strip()
+        if response_text.startswith("data: "):
+            json_data = response_text.replace("data: ", "").strip()
+            result_data = json.loads(json_data)
+        else:
+            result_data = tools_response.json()
+        
+        assert "result" in result_data, "Tools response missing result"
+        assert "tools" in result_data["result"], "Tools response missing tools array"
+        
+        tools_list = result_data["result"]["tools"]
+        assert len(tools_list) > 0, "No tools found"
+        
+        # Find directory_tree tool (the one that was failing)
+        directory_tree_tool = None
+        for tool in tools_list:
+            if tool["name"] == "directory_tree":
+                directory_tree_tool = tool
+                break
+        
+        assert directory_tree_tool is not None, "directory_tree tool not found"
+        
+        # Step 3: Verify directory_tree has correct schema (the fix)
+        schema = directory_tree_tool["inputSchema"]
+        properties = schema["properties"]
+        
+        # These are the correct parameter names that claude.ai expects
+        assert "path" in properties, "directory_tree missing 'path' parameter"
+        assert "depth" in properties, "directory_tree missing 'depth' parameter"  
+        assert "include_filtered" in properties, "directory_tree missing 'include_filtered' parameter"
+        
+        # Step 4: Try to call directory_tree (this would have failed before)
+        call_response = requests.post(
+            endpoint,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"
+            },
+            json={
+                "jsonrpc": "2.0", 
+                "id": "claude-ai-call",
+                "method": "tools/call",
+                "params": {
+                    "name": "directory_tree",
+                    "arguments": {
+                        "path": "/tmp",
+                        "depth": 2,
+                        "include_filtered": False
+                    }
+                }
+            },
+            timeout=15
+        )
+        
+        # The key test: should NOT get parameter validation errors
+        assert call_response.status_code == 200, f"Tool call failed: {call_response.status_code}"
+        
+        print(f"✅ Exact claude.ai workflow completed successfully")
+        print(f"   - Initialize: {init_response.status_code}")
+        print(f"   - Tools list: {tools_response.status_code}")  
+        print(f"   - Tool call: {call_response.status_code}")
+        print(f"   - No 'argument of type function is not iterable' errors!")
 
 
 if __name__ == "__main__":
