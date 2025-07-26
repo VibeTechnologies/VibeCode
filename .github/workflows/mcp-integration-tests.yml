@@ -52,14 +52,14 @@ jobs:
         sudo apt-get install -y curl jq netcat-openbsd
         
     - name: Install Python dependencies
-      working-directory: ./vibecode_pkg
+      working-directory: ./vibecode
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install -e ".[dev]"
         pip install pytest-asyncio pytest-timeout pytest-xdist requests
         
     - name: Verify installation
-      working-directory: ./vibecode_pkg
+      working-directory: ./vibecode
       run: |
         python -c "import vibecode; print('✅ VibeCode imported successfully')"
         python -m vibecode.cli --help
@@ -73,23 +73,36 @@ jobs:
         # Set environment variables for testing
         echo "MCP_TEST_LOG_DIR=/tmp/mcp-test-logs" >> $GITHUB_ENV
         echo "MCP_TEST_ARTIFACT_DIR=/tmp/mcp-test-artifacts" >> $GITHUB_ENV
-        echo "PYTHONPATH=${GITHUB_WORKSPACE}/vibecode_pkg:$PYTHONPATH" >> $GITHUB_ENV
+        echo "PYTHONPATH=${GITHUB_WORKSPACE}/vibecode:$PYTHONPATH" >> $GITHUB_ENV
         
-    - name: Run Claude Code GitHub Actions tests
-      working-directory: ./vibecode_pkg
+    - name: Install Claude CLI (attempt)
+      continue-on-error: true  # Claude CLI may not be available for install
       run: |
-        echo "🧪 Running Claude Code GitHub Actions compatible tests..."
-        python -m pytest tests/test_claude_code_github_actions.py -v --tb=short --timeout=120
+        echo "📥 Attempting to install Claude CLI..."
+        # Try to install Claude CLI if available
+        curl -fsSL https://claude.ai/install.sh | bash || echo "⚠️ Claude CLI installation not available"
+        
+    - name: Run Claude Code integration tests
+      working-directory: ./vibecode
+      run: |
+        echo "🧪 Running Claude Code integration tests..."
+        # Run tests that don't require Claude CLI execution
+        python -m pytest tests/test_claude_code_integration.py::TestClaudeCodeTool::test_find_claude_cli_default -v --tb=short
+        python -m pytest tests/test_claude_code_integration.py::TestClaudeCodeTool::test_get_tool_definition -v --tb=short
+        python -m pytest tests/test_claude_code_integration.py::TestMCPServerIntegration::test_server_creation_with_claude_code -v --tb=short
+        python -m pytest tests/test_claude_code_integration.py::TestMCPServerIntegration::test_tool_count -v --tb=short
+        python -m pytest tests/test_claude_code_mcp_tool.py::TestClaudeCodeMCPTool::test_claude_code_tool_registration -v --tb=short
+        python -m pytest tests/test_claude_code_mcp_tool.py::TestClaudeCodeMCPTool::test_claude_code_tool_signature -v --tb=short
         
     - name: Run MCP integration tests
-      working-directory: ./vibecode_pkg
+      working-directory: ./vibecode
       continue-on-error: true  # MCP tests might be complex in CI
       run: |
         echo "📡 Testing MCP integration..."
         python -m pytest tests/test_mcp_auth_integration.py -v --tb=short --timeout=120
         
     - name: Test CLI functionality
-      working-directory: ./vibecode_pkg
+      working-directory: ./vibecode
       run: |
         echo "⚙️ Testing CLI commands..."
         timeout 10s python -m vibecode.cli start --no-tunnel --no-auth --port 8303 &
@@ -160,7 +173,7 @@ jobs:
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📊 Test Categories" >> $GITHUB_STEP_SUMMARY
-        echo "- Claude Code integration (GitHub Actions compatible mocks)" >> $GITHUB_STEP_SUMMARY
+        echo "- Claude Code integration (real tests, CLI discovery and tool registration)" >> $GITHUB_STEP_SUMMARY
         echo "- MCP server protocol compliance" >> $GITHUB_STEP_SUMMARY
         echo "- CLI functionality and health checks" >> $GITHUB_STEP_SUMMARY
 

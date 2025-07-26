@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VibeCode is a one-command MCP (Model Context Protocol) server for Claude-Code that provides automatic persistent domains and OAuth 2.1 authentication. The project creates secure tunnels using Cloudflare to expose local MCP servers to the internet, enabling remote access to Claude-Code functionality.
+VibeCode is a one-command MCP (Model Context Protocol) server that provides automatic persistent domains and OAuth 2.1 authentication. The project creates secure tunnels using Cloudflare to expose local MCP servers to the internet, enabling remote access to development tools including the full mcp-claude-code toolkit plus native Claude Code CLI integration.
 
 ## Core Architecture
 
@@ -13,6 +13,7 @@ VibeCode is a one-command MCP (Model Context Protocol) server for Claude-Code th
 - **CLI Module** (`vibecode/cli.py`): Primary interface providing `vibecode start` command with intelligent tunnel management
 - **OAuth Provider** (`vibecode/oauth.py`): OAuth 2.1 implementation with Dynamic Client Registration (DCR) and PKCE support
 - **Authenticated Server** (`vibecode/server.py`): FastAPI wrapper that combines MCP server with OAuth authentication middleware
+- **Claude Code Integration** (`vibecode/claude_code_tool.py`): Native Claude Code CLI integration with permission bypass for seamless MCP access
 - **Package Structure**: Two parallel directories (`vibecode/` and `vibecode_pkg/`) for development and distribution
 
 ### Authentication Flow
@@ -29,6 +30,36 @@ Automatic tunnel selection based on authentication status:
 1. **Persistent tunnels**: Creates stable `vibecode-{timestamp}.cfargotunnel.com` domains when authenticated
 2. **Quick tunnels**: Falls back to random `*.trycloudflare.com` domains
 3. **Local mode**: `--no-tunnel` for development
+
+### Available Tools
+
+VibeCode exposes **17 powerful development tools** through the MCP protocol:
+
+#### **File Operations**
+- `read`, `write`, `edit`, `multi_edit` - File manipulation
+- `directory_tree` - Directory structure visualization
+- `grep`, `grep_ast`, `content_replace` - Code search and replacement
+
+#### **Jupyter Support**
+- `notebook_read`, `notebook_edit` - Jupyter notebook operations
+
+#### **Shell & Commands**
+- `run_command` - Execute shell commands in persistent sessions
+
+#### **Task Management**
+- `todo_read`, `todo_write` - Session task tracking
+
+#### **Advanced Features**
+- `dispatch_agent` - Sub-agent delegation for complex tasks
+- `batch` - Batch multiple tool operations
+- `think` - Structured reasoning tool
+
+#### **🚀 Claude Code Integration**
+- `claude_code` - **The flagship tool**: Full Claude Code CLI access with:
+  - File operations, code analysis, Git workflows
+  - Terminal command execution, web search
+  - Multi-step automation, GitHub integration
+  - Permission bypass (`--dangerously-skip-permissions`) for seamless operation
 
 ## Development Commands
 

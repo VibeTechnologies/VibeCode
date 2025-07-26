@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .oauth import OAuthProvider, create_oauth_app
+from .claude_code_tool import claude_code_tool
 
 try:
     from mcp_claude_code.server import ClaudeCodeServer
@@ -41,8 +42,59 @@ class AuthenticatedMCPServer:
             enable_agent_tool=self.enable_agent_tool
         )
         
+        # Add Claude Code tool to the MCP server
+        self._add_claude_code_tool()
+        
         # Create combined FastAPI app
         self.app = None
+    
+    def _add_claude_code_tool(self):
+        """Add Claude Code tool to the MCP server."""
+        mcp = self.mcp_server.mcp
+        
+        @mcp.tool()
+        async def claude_code(prompt: str, workFolder: str = None) -> str:
+            """Claude Code Agent: Your versatile multi-modal assistant for code, file, Git, and terminal operations via Claude CLI. Use `workFolder` for contextual execution.
+
+• File ops: Create, read, (fuzzy) edit, move, copy, delete, list files, analyze/ocr images, file content analysis
+    └─ e.g., "Create /tmp/log.txt with 'system boot'", "Edit main.py to replace 'debug_mode = True' with 'debug_mode = False'", "List files in /src", "Move a specific section somewhere else"
+
+• Code: Generate / analyse / refactor / fix
+    └─ e.g. "Generate Python to parse CSV→JSON", "Find bugs in my_script.py"
+
+• Git: Stage ▸ commit ▸ push ▸ tag (any workflow)
+    └─ "Commit '/workspace/src/main.java' with 'feat: user auth' to develop."
+
+• Terminal: Run any CLI cmd or open URLs
+    └─ "npm run build", "Open https://developer.mozilla.org"
+
+• Web search + summarise content on-the-fly
+
+• Multi-step workflows  (Version bumps, changelog updates, release tagging, etc.)
+
+• GitHub integration  Create PRs, check CI status
+
+• Confused or stuck on an issue? Ask Claude Code for a second opinion, it might surprise you!
+
+**Prompt tips**
+
+1. Be concise, explicit & step-by-step for complex tasks. No need for niceties, this is a tool to get things done.
+2. For multi-line text, write it to a temporary file in the project root, use that file, then delete it.
+3. If you get a timeout, split the task into smaller steps.
+4. **Seeking a second opinion/analysis**: If you're stuck or want advice, you can ask `claude_code` to analyze a problem and suggest solutions. Clearly state in your prompt that you are looking for analysis only and no actual file modifications should be made.
+5. If workFolder is set to the project path, there is no need to repeat that path in the prompt and you can use relative paths for files.
+6. Claude Code is really good at complex multi-step file operations and refactorings and faster than your native edit features.
+7. Combine file operations, README updates, and Git commands in a sequence.
+8. Claude can do much more, just ask it!
+
+Args:
+    prompt: The detailed natural language prompt for Claude to execute.
+    workFolder: Mandatory when using file operations or referencing any file. The working directory for the Claude CLI execution. Must be an absolute path.
+
+Returns:
+    The output from Claude CLI execution.
+            """
+            return await claude_code_tool.execute_claude_code(prompt, workFolder)
     
     def run_sse_with_auth(
         self,
