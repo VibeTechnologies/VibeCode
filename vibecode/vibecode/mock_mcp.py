@@ -118,6 +118,8 @@ class MockMCP:
     
     def __init__(self):
         self._sse_app = None
+        self._tools = {}
+        self._tool_manager = MockToolManager()
     
     def sse_app(self):
         """Return the SSE app - must be a method like in real mcp-claude-code."""
@@ -130,6 +132,37 @@ class MockMCP:
     def streamable_http_app(self):
         """Return the HTTP app - deprecated method for compatibility."""
         return self._sse_app
+    
+    def tool(self):
+        """Mock tool decorator that registers functions."""
+        def decorator(func):
+            # Register the tool
+            tool_name = func.__name__
+            self._tools[tool_name] = MockTool(tool_name, func)
+            # Add to tool manager as well for compatibility
+            if hasattr(self._tool_manager, '_tools'):
+                self._tool_manager._tools[tool_name] = self._tools[tool_name]
+            return func
+        return decorator
+
+
+class MockToolManager:
+    """Mock tool manager for testing."""
+    
+    def __init__(self):
+        self._tools = {}
+
+
+class MockTool:
+    """Mock tool for testing."""
+    
+    def __init__(self, name: str, func):
+        self.name = name
+        self.fn = func
+
+
+class MockMCPRuntime:
+    """Mock MCP runtime with run method."""
     
     def run(self, transport: str = "sse", host: str = "0.0.0.0", port: int = 8300, path: str = "/"):
         """Mock run method."""

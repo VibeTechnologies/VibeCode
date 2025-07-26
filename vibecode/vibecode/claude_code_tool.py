@@ -53,9 +53,9 @@ class ClaudeCodeTool:
         
         # Fallback to CLI name (PATH lookup)
         logger.debug(f'Falling back to "{cli_name}" command name, relying on PATH lookup')
-        logger.warning(
+        logger.debug(
             f'Claude CLI not found at ~/.claude/local/claude. '
-            f'Falling back to "{cli_name}" in PATH. Ensure it is installed and accessible.'
+            f'Falling back to "{cli_name}" in PATH.'
         )
         return cli_name
     

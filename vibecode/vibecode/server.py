@@ -124,8 +124,7 @@ Returns:
         if not mcp_handler:
             raise RuntimeError("Could not find MCP handler in the FastMCP app")
         
-        print(f"🚀 Using Starlette with MCP handler mounted at custom path")
-        print(f"🚀 MCP server type: {type(mcp_server)}")
+        # Starting MCP server with OAuth authentication
         print(f"🚀 MCP will be available at: {path}")
         print(f"🚀 MCP handler type: {type(mcp_handler)}")
         
@@ -271,5 +270,4 @@ Returns:
         # Run the combined Starlette app
         print(f"🚀 Starting combined server (OAuth + MCP) on {host}:{port}")
         print(f"🚀 MCP mounted at: {path}")
-        print(f"🚀 OAuth endpoints available at root level")
         uvicorn.run(app, host=host, port=port)

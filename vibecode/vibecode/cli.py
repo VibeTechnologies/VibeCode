@@ -6,7 +6,13 @@ import sys
 import threading
 import time
 import uuid
+import warnings
 from typing import Tuple, Optional
+
+# Suppress common deprecation warnings for cleaner output
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*class-based.*config.*deprecated.*")
+warnings.filterwarnings("ignore", message=".*websockets.legacy.*deprecated.*")
 
 try:
     from mcp_claude_code.server import ClaudeCodeServer
@@ -408,19 +414,18 @@ def print_instructions(url: str, enable_auth: bool = True) -> None:
     print("\n" + "="*60)
     print("🚀 Claude-Code MCP server is running!")
     print("="*60)
-    print(f"\n📡 Public URL: {url}\n")
+    print(f"\n📡 Public URL: {url}")
     
     if enable_auth:
-        print("🔐 OAuth 2.1 Authentication Enabled")
-        print("OAuth Endpoints:")
+        print("\n🔐 OAuth 2.1 Authentication Enabled")
         base_url = url.rsplit('/', 1)[0]  # Remove UUID path
+        print("OAuth Endpoints:")
         print(f"  • Authorization Server Metadata: {base_url}/.well-known/oauth-authorization-server")
         print(f"  • Client Registration: {base_url}/register")
         print(f"  • Authorization: {base_url}/authorize")
         print(f"  • Token: {base_url}/token")
-        print()
     
-    print("To use with Claude.ai:")
+    print("\nTo use with Claude.ai:")
     print("1. Copy the URL above")
     print("2. Add it to your MCP configuration")
     print("3. Set transport type to: sse")
@@ -479,7 +484,7 @@ def main() -> None:
         # Start the MCP server in a daemon thread
         enable_auth = not args.no_auth
         auth_msg = "with OAuth authentication" if enable_auth else "without authentication"
-        print(f"Starting MCP server on port {args.port} {auth_msg}...")
+        print(f"Starting server on port {args.port}...")
         server_thread = threading.Thread(
             target=run_mcp_server, 
             args=(args.port, uuid_path, enable_auth), 
