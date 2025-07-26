@@ -160,6 +160,11 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
     Returns:
         Tuple of (public_url, process)
     """
+    # Extract base URL without path for cloudflared
+    # cloudflared should only get the host:port, not the UUID path
+    from urllib.parse import urlparse
+    parsed = urlparse(local_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
     # Find cloudflared binary
     cloudflared_paths = [
         "cloudflared",  # In PATH
@@ -182,25 +187,25 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
     
     if tunnel_name:
         # Use named tunnel (persistent domain)
+        print(f"Starting cloudflared with base URL: {base_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url, "run", tunnel_name],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", base_url, "run", tunnel_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,  # Line buffered
         )
         
-        # For named tunnels, we need to get the domain from tunnel info
-        public_url = get_tunnel_domain(cloudflared_cmd, tunnel_name)
-        if not public_url:
-            process.terminate()
-            raise RuntimeError(f"Failed to get domain for named tunnel '{tunnel_name}'")
+        # For named tunnels, the domain follows a predictable pattern
+        public_url = f"https://{tunnel_name}.cfargotunnel.com"
+        print(f"Using tunnel domain: {public_url}", file=sys.stderr)
         
         return public_url, process
     else:
         # Use quick tunnel (random domain)
+        print(f"Starting cloudflared with base URL: {base_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", base_url],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
