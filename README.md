@@ -61,6 +61,20 @@ vibecode start --quick
 
 Copy the public URL from the terminal output (e.g., `https://example.trycloudflare.com/uuid`)
 
+### Query Available Tools
+
+```bash
+# Check what tools are available
+curl -X POST http://localhost:8300/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+# Or use the included script
+python query_tools.py --info
+```
+
+Expected: **17 tools** including `claude_code` (Claude Code CLI integration)
+
 ### Step 2: Access Claude.ai Connectors
 
 1. Go to [claude.ai/settings/connectors](https://claude.ai/settings/connectors)
