@@ -129,6 +129,7 @@ vibecode start                   # Smart tunnel selection
 vibecode start --quick           # Force quick tunnel (random domain)
 vibecode start --no-tunnel      # Local only
 vibecode start --port 9000      # Custom port
+vibecode start --reset-uuid     # Generate new session UUID (new MCP URL path)
 
 # Setup
 vibecode setup                  # One-time setup guide
@@ -213,6 +214,32 @@ VibeCode implements OAuth 2.1 with Dynamic Client Registration (DCR) for seamles
 - **OAuth 2.1 compliance** with Dynamic Client Registration
 - **Cloudflare tunnel encryption** for secure communication
 - **Directory access controls** via allowed_paths configuration
+
+### UUID Persistence
+
+VibeCode automatically maintains the same MCP URL path across restarts by saving a session UUID to `.vibecode.json` in your working directory.
+
+**Benefits**:
+- 🔗 **Same URL every time**: No need to reconfigure Claude.ai after restarts
+- 💾 **Automatic saving**: UUID is saved on first run and reused on subsequent runs
+- 🎯 **Project-specific**: Each directory gets its own UUID for organization
+
+**Usage**:
+```bash
+# First run - generates new UUID and saves to .vibecode.json
+vibecode start  # → https://domain.com/abc123...
+
+# Subsequent runs - reuses saved UUID
+vibecode start  # → https://domain.com/abc123... (same path!)
+
+# Force new UUID (e.g., for sharing with different teams)
+vibecode start --reset-uuid  # → generates new UUID, saves to .vibecode.json
+```
+
+**File Management**:
+- `.vibecode.json` is automatically created in your current working directory
+- The file is ignored by git (added to .gitignore) to avoid committing session data
+- Each project directory can have its own `.vibecode.json` with a unique UUID
 
 ## Troubleshooting
 

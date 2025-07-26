@@ -5,17 +5,85 @@ warnings.simplefilter("ignore")
 os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"
 
 import argparse
+import json
 import re
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Tuple, Optional
 
 from mcp_claude_code.server import ClaudeCodeServer
 
 from .server import AuthenticatedMCPServer
+
+
+def get_vibecode_config_path() -> Path:
+    """Get the path to .vibecode.json in the current working directory."""
+    return Path.cwd() / ".vibecode.json"
+
+
+def load_persistent_uuid() -> Optional[str]:
+    """Load persistent UUID from .vibecode.json file."""
+    config_path = get_vibecode_config_path()
+    try:
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                return config.get('uuid')
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Could not read .vibecode.json: {e}", file=sys.stderr)
+    return None
+
+
+def save_persistent_uuid(uuid_value: str) -> None:
+    """Save persistent UUID to .vibecode.json file."""
+    config_path = get_vibecode_config_path()
+    
+    # Load existing config or create new one
+    config = {}
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            # If file is corrupted, start fresh
+            config = {}
+    
+    # Update UUID
+    config['uuid'] = uuid_value
+    
+    # Save config
+    try:
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+        print(f"💾 Saved session UUID to {config_path}", file=sys.stderr)
+    except IOError as e:
+        print(f"Warning: Could not save .vibecode.json: {e}", file=sys.stderr)
+
+
+def get_or_create_uuid(reset: bool = False) -> str:
+    """Get existing UUID from .vibecode.json or create a new one."""
+    # If reset flag is set, force creation of new UUID
+    if reset:
+        print(f"🔄 Resetting session UUID (--reset-uuid)", file=sys.stderr)
+        new_uuid = uuid.uuid4().hex
+        save_persistent_uuid(new_uuid)
+        return new_uuid
+    
+    # Try to load existing UUID
+    existing_uuid = load_persistent_uuid()
+    if existing_uuid:
+        print(f"🔄 Using saved session UUID from .vibecode.json", file=sys.stderr)
+        return existing_uuid
+    
+    # Create new UUID
+    new_uuid = uuid.uuid4().hex
+    print(f"🆕 Generated new session UUID", file=sys.stderr)
+    save_persistent_uuid(new_uuid)
+    return new_uuid
 
 
 def check_cloudflared() -> bool:
@@ -449,6 +517,7 @@ def main() -> None:
     start_parser.add_argument("--no-auth", action="store_true", help="Disable OAuth authentication (for testing only)")
     start_parser.add_argument("--tunnel", type=str, help="Use specific named tunnel (optional)")
     start_parser.add_argument("--quick", action="store_true", help="Use quick tunnel (random domain) instead of persistent")
+    start_parser.add_argument("--reset-uuid", action="store_true", help="Generate new session UUID (creates new MCP URL path)")
     
     # Add simple setup command for first-time users
     setup_parser = subparsers.add_parser("setup", help="One-time setup for persistent domains")
@@ -472,8 +541,9 @@ def main() -> None:
             print("  - Or run with --no-tunnel for local-only mode", file=sys.stderr)
             sys.exit(1)
         
-        # Generate random UUID path
-        uuid_path = f"/{uuid.uuid4().hex}"
+        # Get or create persistent UUID path
+        uuid_hex = get_or_create_uuid(reset=args.reset_uuid)
+        uuid_path = f"/{uuid_hex}"
         
         # Start the MCP server in a daemon thread
         enable_auth = not args.no_auth
