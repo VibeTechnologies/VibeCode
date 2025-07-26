@@ -359,16 +359,29 @@ Returns:
                         # Method 2: Check for tools in the MCP server directly 
                         if not tools_found and hasattr(mcp_server, '_tools'):
                             for tool_name, tool in mcp_server._tools.items():
+                                # Try to get schema from the tool
+                                schema = {
+                                    "type": "object",
+                                    "properties": {
+                                        "input": {"type": "string", "description": "Input parameter"}
+                                    },
+                                    "required": ["input"]
+                                }
+                                
+                                # FastMCP tools have a 'parameters' attribute containing the JSON schema
+                                if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
+                                    schema = tool.parameters
+                                elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
+                                    schema = tool.schema
+                                elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
+                                    schema = tool._schema
+                                elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
+                                    schema = tool.input_schema
+                                
                                 tools.append({
                                     "name": tool_name,
                                     "description": getattr(tool, 'description', f"Tool: {tool_name}"),
-                                    "inputSchema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "input": {"type": "string", "description": "Input parameter"}
-                                        },
-                                        "required": ["input"]
-                                    }
+                                    "inputSchema": schema
                                 })
                                 tools_found = True
                         
@@ -377,16 +390,29 @@ Returns:
                             server_mcp = self.mcp_server.mcp
                             if hasattr(server_mcp, '_tool_manager') and hasattr(server_mcp._tool_manager, '_tools'):
                                 for tool_name, tool in server_mcp._tool_manager._tools.items():
+                                    # Try to get schema from the tool
+                                    schema = {
+                                        "type": "object",
+                                        "properties": {
+                                            "input": {"type": "string", "description": "Input parameter"}
+                                        },
+                                        "required": ["input"]
+                                    }
+                                    
+                                    # FastMCP tools have a 'parameters' attribute containing the JSON schema
+                                    if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
+                                        schema = tool.parameters
+                                    elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
+                                        schema = tool.schema
+                                    elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
+                                        schema = tool._schema
+                                    elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
+                                        schema = tool.input_schema
+                                    
                                     tools.append({
                                         "name": tool_name,
                                         "description": getattr(tool, 'description', f"Tool: {tool_name}"),
-                                        "inputSchema": {
-                                            "type": "object",
-                                            "properties": {
-                                                "input": {"type": "string", "description": "Input parameter"}
-                                            },
-                                            "required": ["input"]
-                                        }
+                                        "inputSchema": schema
                                     })
                                     tools_found = True
                         
