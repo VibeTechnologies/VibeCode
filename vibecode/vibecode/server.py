@@ -135,7 +135,7 @@ Returns:
                 import uvicorn
                 
                 # Get the FastMCP SSE app and try to run it properly with context
-                fastmcp_app = mcp_server.mcp.sse_app
+                fastmcp_app = mcp_server.sse_app
                 logger.info("Attempting to use FastMCP SSE app")
                 
                 # Create OAuth endpoint handlers (same as before)
@@ -296,6 +296,12 @@ Returns:
                     request_data = await request.json()
                     method = request_data.get("method", "")
                     request_id = request_data.get("id", "unknown")
+                    
+                    # Set up the MCP context for this request
+                    from fastmcp.server.dependencies import set_context
+                    from fastmcp import Context
+                    ctx = Context(mcp_server)
+                    set_context(ctx)
                     
                     # Log MCP request with essential info only
                     logger.info(f"MCP {method} (id: {request_id})")
@@ -490,40 +496,75 @@ Returns:
                                 tools_dict = mcp_server._tool_manager._tools
                                 if tool_name in tools_dict:
                                     tool = tools_dict[tool_name]
+                                    logger.info(f"Found tool {tool_name}: {tool}")
+                                    logger.info(f"Tool attributes: fn={hasattr(tool, 'fn')}, handler={hasattr(tool, 'handler')}")
                                     try:
-                                        # Execute the tool function with proper context
-                                        if hasattr(tool, 'fn') and callable(tool.fn):
-                                            # Create a minimal context object for the tool
-                                            from fastmcp import Context
-                                            mock_ctx = Context(mcp_server)
+                                        # Try different ways to get the actual function
+                                        tool_fn = None
+                                        if hasattr(tool, 'handler') and callable(tool.handler):
+                                            tool_fn = tool.handler
+                                        elif hasattr(tool, 'fn') and callable(tool.fn):
+                                            tool_fn = tool.fn
+                                        elif callable(tool):
+                                            tool_fn = tool
+                                        
+                                        if tool_fn:
+                                            # Use the context we set up for this request
+                                            mock_ctx = get_context()
                                             
                                             # Get the tool function signature to determine required arguments
                                             import inspect
-                                            sig = inspect.signature(tool.fn)
+                                            sig = inspect.signature(tool_fn)
+                                            logger.info(f"Tool function signature: {sig}")
                                             
-                                            # Prepare arguments based on function signature
-                                            call_args = {}
-                                            for param_name, param in sig.parameters.items():
-                                                if param_name == 'ctx':
-                                                    call_args[param_name] = mock_ctx
-                                                elif param_name in arguments:
-                                                    call_args[param_name] = arguments[param_name]
-                                                elif param.default != inspect.Parameter.empty:
-                                                    # Use default value if available
-                                                    continue
-                                                else:
-                                                    # Required parameter not provided, set reasonable defaults
-                                                    if param_name == 'session_id':
-                                                        call_args[param_name] = f"session_{request_id}"
-                                                    elif param_name == 'offset':
-                                                        call_args[param_name] = 0
-                                                    elif param_name == 'limit':
-                                                        call_args[param_name] = None
-                                                    elif param_name == 'expected_replacements':
-                                                        call_args[param_name] = 1
-                                                    # Add other common defaults as needed
-                                            
-                                            tool_result = await tool.fn(**call_args)
+                                            # Check if this is a wrapped tool function that expects kwargs
+                                            # The mcp_claude_code tools use a different pattern
+                                            if 'kwargs' in sig.parameters or all(
+                                                param.kind == inspect.Parameter.VAR_KEYWORD 
+                                                for param in sig.parameters.values()
+                                            ):
+                                                # This is a **kwargs style function, pass arguments directly
+                                                logger.info("Using kwargs style call")
+                                                tool_result = await tool_fn(**arguments)
+                                            else:
+                                                # Prepare arguments based on function signature
+                                                call_args = {}
+                                                for param_name, param in sig.parameters.items():
+                                                    if param_name == 'ctx':
+                                                        call_args[param_name] = mock_ctx
+                                                    elif param_name in arguments:
+                                                        call_args[param_name] = arguments[param_name]
+                                                    elif param.default != inspect.Parameter.empty:
+                                                        # Use default value if available
+                                                        call_args[param_name] = param.default
+                                                    else:
+                                                        # Required parameter not provided, set reasonable defaults
+                                                        if param_name == 'session_id':
+                                                            call_args[param_name] = f"session_{request_id}"
+                                                        elif param_name == 'offset':
+                                                            call_args[param_name] = 0
+                                                        elif param_name == 'limit':
+                                                            call_args[param_name] = None
+                                                        elif param_name == 'expected_replacements':
+                                                            call_args[param_name] = 1
+                                                        elif param_name == 'time_out':
+                                                            call_args[param_name] = 30
+                                                        elif param_name == 'is_input':
+                                                            call_args[param_name] = False
+                                                        elif param_name == 'blocking':
+                                                            call_args[param_name] = False
+                                                        elif param_name == 'depth':
+                                                            call_args[param_name] = 3
+                                                        elif param_name == 'include_filtered':
+                                                            call_args[param_name] = False
+                                                        elif param_name == 'path':
+                                                            call_args[param_name] = arguments.get('path', '.')
+                                                        elif param_name == 'command':
+                                                            call_args[param_name] = arguments.get('command', '')
+                                                        # Add other common defaults as needed
+                                                
+                                                logger.info(f"Calling with args: {call_args}")
+                                                tool_result = await tool_fn(**call_args)
                                             
                                             # Format result appropriately
                                             if hasattr(tool_result, 'content'):
@@ -539,6 +580,17 @@ Returns:
                                                 "result": {
                                                     "content": result_content,
                                                     "isError": False
+                                                }
+                                            }
+                                            tool_found = True
+                                        else:
+                                            logger.error(f"Could not find callable function for tool {tool_name}")
+                                            response = {
+                                                "jsonrpc": "2.0",
+                                                "id": request_id,
+                                                "result": {
+                                                    "content": [{"type": "text", "text": f"Error: Could not find callable function for tool {tool_name}"}],
+                                                    "isError": True
                                                 }
                                             }
                                             tool_found = True
