@@ -124,7 +124,7 @@ Returns:
         logger.info("Initializing MCP server endpoint")
         
         # Try to use the real FastMCP server first, fallback to our custom implementation
-        use_fallback = True  # Force fallback for now due to path issues
+        use_fallback = True  # Use fallback for proper routing control
         
         if not use_fallback:
             # Try to use the real FastMCP SSE server
@@ -272,418 +272,8 @@ Returns:
                 use_fallback = True
         
         if use_fallback:
-            # Fallback: create a simple FastAPI app with MCP endpoints
-            from fastapi import FastAPI, Request
-            from fastapi.responses import StreamingResponse
-            import json
-            
-            mcp_app = FastAPI()
-            
-            # Add HTTP request logging middleware
-            @mcp_app.middleware("http")
-            async def log_requests(request: Request, call_next):
-                # Log incoming request with essential info only
-                path = request.url.path
-                if path != "/health":  # Skip health check spam
-                    logger.info(f"{request.method} {path}")
-                
-                response = await call_next(request)
-                
-                # Log response status for errors only
-                if response.status_code >= 400 and path != "/health":
-                    logger.warning(f"HTTP {response.status_code} {path}")
-                
-                return response
-            
-            @mcp_app.post("/")
-            async def handle_mcp_request(request: Request):
-                """Handle MCP JSON-RPC requests."""
-                try:
-                    request_data = await request.json()
-                except Exception as e:
-                    # Return proper HTTP error for malformed JSON
-                    logger.error(f"JSON parsing error: {e}")
-                    return JSONResponse(
-                        {"error": "Invalid JSON", "message": str(e)},
-                        status_code=400
-                    )
-                
-                try:
-                    method = request_data.get("method", "")
-                    request_id = request_data.get("id", "unknown")
-                    
-                    # Set up the MCP context for this request
-                    try:
-                        from fastmcp.server.dependencies import set_context
-                        from fastmcp import Context
-                        ctx = Context(mcp_server)
-                        set_context(ctx)
-                    except ImportError:
-                        # Context setup not available, continue without it
-                        pass
-                    
-                    # Log MCP request with essential info only
-                    logger.info(f"MCP {method} (id: {request_id})")
-                    if method == "tools/call":
-                        tool_name = request_data.get("params", {}).get("name", "unknown")
-                        logger.info(f"  Tool: {tool_name}")
-                    
-                    if method == "initialize":
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "protocolVersion": "2024-11-05",
-                                "capabilities": {
-                                    "tools": {"listChanged": True},
-                                    "logging": {}
-                                },
-                                "serverInfo": {
-                                    "name": self.name,
-                                    "version": "1.0.0"
-                                }
-                            }
-                        }
-                    elif method == "tools/list":
-                        # Get actual tools from the MCP server
-                        tools = []
-                        
-                        # Try to get tools from the real MCP server in various ways
-                        tools_found = False
-                        
-                        # Method 1: Check _tool_manager._tools (fastmcp)
-                        if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
-                            for tool_name, tool in mcp_server._tool_manager._tools.items():
-                                # Try to get schema from the tool
-                                schema = {
-                                    "type": "object",
-                                    "properties": {
-                                        "prompt": {"type": "string", "description": "Input prompt"}
-                                    },
-                                    "required": ["prompt"]
-                                }
-                                
-                                # FastMCP tools have a 'parameters' attribute containing the JSON schema
-                                if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
-                                    schema = tool.parameters
-                                # Fallback to other schema attributes if available
-                                elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
-                                    schema = tool.schema
-                                elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
-                                    schema = tool._schema
-                                elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
-                                    schema = tool.input_schema
-                                
-                                tools.append({
-                                    "name": tool_name,
-                                    "description": getattr(tool, 'description', f"Tool: {tool_name}"),
-                                    "inputSchema": schema
-                                })
-                                tools_found = True
-                        
-                        # Method 2: Check for tools in the MCP server directly 
-                        if not tools_found and hasattr(mcp_server, '_tools'):
-                            for tool_name, tool in mcp_server._tools.items():
-                                # Try to get schema from the tool
-                                schema = {
-                                    "type": "object",
-                                    "properties": {
-                                        "input": {"type": "string", "description": "Input parameter"}
-                                    },
-                                    "required": ["input"]
-                                }
-                                
-                                # FastMCP tools have a 'parameters' attribute containing the JSON schema
-                                if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
-                                    schema = tool.parameters
-                                elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
-                                    schema = tool.schema
-                                elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
-                                    schema = tool._schema
-                                elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
-                                    schema = tool.input_schema
-                                
-                                tools.append({
-                                    "name": tool_name,
-                                    "description": getattr(tool, 'description', f"Tool: {tool_name}"),
-                                    "inputSchema": schema
-                                })
-                                tools_found = True
-                        
-                        # Method 3: Check the mcp_server (ClaudeCodeServer) itself
-                        if not tools_found and hasattr(self.mcp_server, 'mcp'):
-                            server_mcp = self.mcp_server.mcp
-                            if hasattr(server_mcp, '_tool_manager') and hasattr(server_mcp._tool_manager, '_tools'):
-                                for tool_name, tool in server_mcp._tool_manager._tools.items():
-                                    # Try to get schema from the tool
-                                    schema = {
-                                        "type": "object",
-                                        "properties": {
-                                            "input": {"type": "string", "description": "Input parameter"}
-                                        },
-                                        "required": ["input"]
-                                    }
-                                    
-                                    # FastMCP tools have a 'parameters' attribute containing the JSON schema
-                                    if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
-                                        schema = tool.parameters
-                                    elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
-                                        schema = tool.schema
-                                    elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
-                                        schema = tool._schema
-                                    elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
-                                        schema = tool.input_schema
-                                    
-                                    tools.append({
-                                        "name": tool_name,
-                                        "description": getattr(tool, 'description', f"Tool: {tool_name}"),
-                                        "inputSchema": schema
-                                    })
-                                    tools_found = True
-                        
-                        logger.info(f"Discovered {len(tools)} tools")
-                        
-                        # Always add claude_code tool (our custom tool)
-                        if not any(tool["name"] == "claude_code" for tool in tools):
-                            tools.append({
-                                "name": "claude_code",
-                                "description": "Claude Code Agent: Your versatile multi-modal assistant for code, file, Git, and terminal operations via Claude CLI.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "prompt": {
-                                            "type": "string",
-                                            "description": "The detailed natural language prompt for Claude to execute."
-                                        },
-                                        "workFolder": {
-                                            "type": "string",
-                                            "description": "The working directory for Claude CLI execution. Must be an absolute path."
-                                        }
-                                    },
-                                    "required": ["prompt"]
-                                }
-                            })
-                        
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "tools": tools
-                            }
-                        }
-                    elif method == "tools/call":
-                        # Handle tool execution
-                        params = request_data.get("params", {})
-                        tool_name = params.get("name")
-                        arguments = params.get("arguments", {})
-                        
-                        if tool_name == "claude_code":
-                            # Execute the claude_code tool
-                            try:
-                                from .claude_code_tool import claude_code_tool
-                                
-                                prompt = arguments.get("prompt", "")
-                                work_folder = arguments.get("workFolder")
-                                
-                                # Execute the tool
-                                result = await claude_code_tool.execute_claude_code(prompt, work_folder)
-                                
-                                response = {
-                                    "jsonrpc": "2.0",
-                                    "id": request_id,
-                                    "result": {
-                                        "content": [{"type": "text", "text": result}],
-                                        "isError": False
-                                    }
-                                }
-                                
-                            except Exception as e:
-                                logger.error(f"Tool execution error: {e}")
-                                response = {
-                                    "jsonrpc": "2.0",
-                                    "id": request_id,
-                                    "result": {
-                                        "content": [{"type": "text", "text": f"Error executing claude_code: {str(e)}"}],
-                                        "isError": True
-                                    }
-                                }
-                        else:
-                            # Try to find and execute the tool from the MCP server
-                            tool_found = False
-                            
-                            if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
-                                tools_dict = mcp_server._tool_manager._tools
-                                if tool_name in tools_dict:
-                                    tool = tools_dict[tool_name]
-                                    logger.info(f"Found tool {tool_name}: {tool}")
-                                    logger.info(f"Tool attributes: fn={hasattr(tool, 'fn')}, handler={hasattr(tool, 'handler')}")
-                                    try:
-                                        # Try different ways to get the actual function
-                                        tool_fn = None
-                                        if hasattr(tool, 'handler') and callable(tool.handler):
-                                            tool_fn = tool.handler
-                                        elif hasattr(tool, 'fn') and callable(tool.fn):
-                                            tool_fn = tool.fn
-                                        elif callable(tool):
-                                            tool_fn = tool
-                                        
-                                        if tool_fn:
-                                            # Use the context we set up for this request
-                                            try:
-                                                from fastmcp.server.dependencies import get_context
-                                                mock_ctx = get_context()
-                                            except ImportError:
-                                                # If get_context is not available, create a mock context
-                                                mock_ctx = type('MockContext', (), {'session_id': f"session_{request_id}"})()  
-                                            
-                                            # Get the tool function signature to determine required arguments
-                                            import inspect
-                                            sig = inspect.signature(tool_fn)
-                                            logger.info(f"Tool function signature: {sig}")
-                                            
-                                            # Check if this is a wrapped tool function that expects kwargs
-                                            # The mcp_claude_code tools use a different pattern
-                                            if 'kwargs' in sig.parameters or all(
-                                                param.kind == inspect.Parameter.VAR_KEYWORD 
-                                                for param in sig.parameters.values()
-                                            ):
-                                                # This is a **kwargs style function, pass arguments directly
-                                                logger.info("Using kwargs style call")
-                                                tool_result = await tool_fn(**arguments)
-                                            else:
-                                                # Prepare arguments based on function signature
-                                                call_args = {}
-                                                for param_name, param in sig.parameters.items():
-                                                    if param_name == 'ctx':
-                                                        call_args[param_name] = mock_ctx
-                                                    elif param_name in arguments:
-                                                        call_args[param_name] = arguments[param_name]
-                                                    elif param.default != inspect.Parameter.empty:
-                                                        # Use default value if available
-                                                        call_args[param_name] = param.default
-                                                    else:
-                                                        # Required parameter not provided, set reasonable defaults
-                                                        if param_name == 'session_id':
-                                                            call_args[param_name] = f"session_{request_id}"
-                                                        elif param_name == 'offset':
-                                                            call_args[param_name] = 0
-                                                        elif param_name == 'limit':
-                                                            call_args[param_name] = None
-                                                        elif param_name == 'expected_replacements':
-                                                            call_args[param_name] = 1
-                                                        elif param_name == 'time_out':
-                                                            call_args[param_name] = 30
-                                                        elif param_name == 'is_input':
-                                                            call_args[param_name] = False
-                                                        elif param_name == 'blocking':
-                                                            call_args[param_name] = False
-                                                        elif param_name == 'depth':
-                                                            call_args[param_name] = 3
-                                                        elif param_name == 'include_filtered':
-                                                            call_args[param_name] = False
-                                                        elif param_name == 'path':
-                                                            call_args[param_name] = arguments.get('path', '.')
-                                                        elif param_name == 'command':
-                                                            call_args[param_name] = arguments.get('command', '')
-                                                        # Add other common defaults as needed
-                                                
-                                                logger.info(f"Calling with args: {call_args}")
-                                                tool_result = await tool_fn(**call_args)
-                                            
-                                            # Format result appropriately
-                                            if hasattr(tool_result, 'content'):
-                                                result_content = tool_result.content
-                                            elif isinstance(tool_result, list):
-                                                result_content = tool_result
-                                            else:
-                                                result_content = [{"type": "text", "text": str(tool_result)}]
-                                            
-                                            response = {
-                                                "jsonrpc": "2.0",
-                                                "id": request_id,
-                                                "result": {
-                                                    "content": result_content,
-                                                    "isError": False
-                                                }
-                                            }
-                                            tool_found = True
-                                        else:
-                                            logger.error(f"Could not find callable function for tool {tool_name}")
-                                            response = {
-                                                "jsonrpc": "2.0",
-                                                "id": request_id,
-                                                "result": {
-                                                    "content": [{"type": "text", "text": f"Error: Could not find callable function for tool {tool_name}"}],
-                                                    "isError": True
-                                                }
-                                            }
-                                            tool_found = True
-                                    except Exception as e:
-                                        logger.error(f"Tool {tool_name} execution error: {e}")
-                                        response = {
-                                            "jsonrpc": "2.0",
-                                            "id": request_id,
-                                            "result": {
-                                                "content": [{"type": "text", "text": f"Error executing {tool_name}: {str(e)}"}],
-                                                "isError": True
-                                            }
-                                        }
-                                        tool_found = True
-                            
-                            if not tool_found:
-                                response = {
-                                    "jsonrpc": "2.0",
-                                    "id": request_id,
-                                    "error": {
-                                        "code": -32601,
-                                        "message": f"Tool not found: {tool_name}"
-                                    }
-                                }
-                    else:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {
-                                "code": -32601,
-                                "message": f"Method not found: {method}"
-                            }
-                        }
-                    
-                    # Return as SSE stream for compatibility
-                    async def generate_sse():
-                        yield f"data: {json.dumps(response)}\n\n"
-                    
-                    return StreamingResponse(
-                        generate_sse(),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive",
-                        }
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"MCP request error: {e}")
-                    error_response = {
-                        "jsonrpc": "2.0",
-                        "id": request_data.get("id", "error") if 'request_data' in locals() else "error",
-                        "error": {
-                            "code": -32603,
-                            "message": f"Internal error: {str(e)}"
-                        }
-                    }
-                    
-                    async def generate_error_sse():
-                        yield f"data: {json.dumps(error_response)}\n\n"
-                    
-                    return StreamingResponse(
-                        generate_error_sse(),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive",
-                        }
-                    )
+            # Fallback: use Starlette directly with MCP endpoints
+            pass  # MCP handler is defined below
         
         logger.info(f"MCP endpoint ready at: {path}")
         
@@ -796,8 +386,377 @@ Returns:
             """Health check endpoint."""
             return JSONResponse({"status": "healthy", "server": self.name, "oauth_enabled": True})
         
+        async def handle_mcp_request(request):
+            """Handle MCP JSON-RPC requests."""
+            try:
+                request_data = await request.json()
+            except Exception as e:
+                # Return proper HTTP error for malformed JSON
+                logger.error(f"JSON parsing error: {e}")
+                return JSONResponse(
+                    {"error": "Invalid JSON", "message": str(e)},
+                    status_code=400
+                )
+
+            try:
+                method = request_data.get("method", "")
+                request_id = request_data.get("id", "unknown")
+                
+                # Set up the MCP context for this request
+                try:
+                    from fastmcp.server.dependencies import set_context
+                    from fastmcp import Context
+                    ctx = Context(mcp_server)
+                    set_context(ctx)
+                except ImportError:
+                    # Context setup not available, continue without it
+                    pass
+                
+                # Log MCP request with essential info only
+                logger.info(f"MCP {method} (id: {request_id})")
+                if method == "tools/call":
+                    tool_name = request_data.get("params", {}).get("name", "unknown")
+                    logger.info(f"  Tool: {tool_name}")
+                
+                if method == "initialize":
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {
+                                "tools": {"listChanged": True},
+                                "logging": {}
+                            },
+                            "serverInfo": {
+                                "name": self.name,
+                                "version": "1.0.0"
+                            }
+                        }
+                    }
+                elif method == "tools/list":
+                    # Get actual tools from the MCP server
+                    tools = []
+                    
+                    # Try to get tools from the real MCP server in various ways
+                    tools_found = False
+                    
+                    # Method 1: Check _tool_manager._tools (fastmcp)
+                    if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
+                        for tool_name, tool in mcp_server._tool_manager._tools.items():
+                            # Try to get schema from the tool
+                            schema = {
+                                "type": "object",
+                                "properties": {
+                                    "prompt": {"type": "string", "description": "Input prompt"}
+                                },
+                                "required": ["prompt"]
+                            }
+                            
+                            # FastMCP tools have a 'parameters' attribute containing the JSON schema
+                            if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
+                                schema = tool.parameters
+                            # Fallback to other schema attributes if available
+                            elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
+                                schema = tool.schema
+                            elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
+                                schema = tool._schema
+                            elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
+                                schema = tool.input_schema
+                            
+                            tools.append({
+                                "name": tool_name,
+                                "description": getattr(tool, 'description', f"Tool: {tool_name}"),
+                                "inputSchema": schema
+                            })
+                            tools_found = True
+                    
+                    # Method 2: Check for tools in the MCP server directly 
+                    if not tools_found and hasattr(mcp_server, '_tools'):
+                        for tool_name, tool in mcp_server._tools.items():
+                            # Try to get schema from the tool
+                            schema = {
+                                "type": "object",
+                                "properties": {
+                                    "input": {"type": "string", "description": "Input parameter"}
+                                },
+                                "required": ["input"]
+                            }
+                            
+                            # FastMCP tools have a 'parameters' attribute containing the JSON schema
+                            if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
+                                schema = tool.parameters
+                            elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
+                                schema = tool.schema
+                            elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
+                                schema = tool._schema
+                            elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
+                                schema = tool.input_schema
+                            
+                            tools.append({
+                                "name": tool_name,
+                                "description": getattr(tool, 'description', f"Tool: {tool_name}"),
+                                "inputSchema": schema
+                            })
+                            tools_found = True
+                    
+                    # Method 3: Check the mcp_server (ClaudeCodeServer) itself
+                    if not tools_found and hasattr(self.mcp_server, 'mcp'):
+                        server_mcp = self.mcp_server.mcp
+                        if hasattr(server_mcp, '_tool_manager') and hasattr(server_mcp._tool_manager, '_tools'):
+                            for tool_name, tool in server_mcp._tool_manager._tools.items():
+                                # Try to get schema from the tool
+                                schema = {
+                                    "type": "object",
+                                    "properties": {
+                                        "input": {"type": "string", "description": "Input parameter"}
+                                    },
+                                    "required": ["input"]
+                                }
+                                
+                                # FastMCP tools have a 'parameters' attribute containing the JSON schema
+                                if hasattr(tool, 'parameters') and isinstance(tool.parameters, dict):
+                                    schema = tool.parameters
+                                elif hasattr(tool, 'schema') and not callable(getattr(tool, 'schema', None)):
+                                    schema = tool.schema
+                                elif hasattr(tool, '_schema') and not callable(getattr(tool, '_schema', None)):
+                                    schema = tool._schema
+                                elif hasattr(tool, 'input_schema') and not callable(getattr(tool, 'input_schema', None)):
+                                    schema = tool.input_schema
+                                
+                                tools.append({
+                                    "name": tool_name,
+                                    "description": getattr(tool, 'description', f"Tool: {tool_name}"),
+                                    "inputSchema": schema
+                                })
+                                tools_found = True
+                    
+                    logger.info(f"Discovered {len(tools)} tools")
+                    
+                    # Always add claude_code tool (our custom tool)
+                    if not any(tool["name"] == "claude_code" for tool in tools):
+                        tools.append({
+                            "name": "claude_code",
+                            "description": "Claude Code Agent: Your versatile multi-modal assistant for code, file, Git, and terminal operations via Claude CLI.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "prompt": {
+                                        "type": "string",
+                                        "description": "The detailed natural language prompt for Claude to execute."
+                                    },
+                                    "workFolder": {
+                                        "type": "string",
+                                        "description": "The working directory for Claude CLI execution. Must be an absolute path."
+                                    }
+                                },
+                                "required": ["prompt"]
+                            }
+                        })
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "tools": tools
+                        }
+                    }
+                elif method == "tools/call":
+                    # Handle tool execution
+                    params = request_data.get("params", {})
+                    tool_name = params.get("name")
+                    arguments = params.get("arguments", {})
+                    
+                    if tool_name == "claude_code":
+                        # Execute the claude_code tool
+                        try:
+                            from .claude_code_tool import claude_code_tool
+                            
+                            prompt = arguments.get("prompt", "")
+                            work_folder = arguments.get("workFolder")
+                            
+                            # Execute the tool
+                            result = await claude_code_tool.execute_claude_code(prompt, work_folder)
+                            
+                            response = {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "result": {
+                                    "content": [{"type": "text", "text": result}],
+                                    "isError": False
+                                }
+                            }
+                            
+                        except Exception as e:
+                            logger.error(f"Tool execution error: {e}")
+                            response = {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "result": {
+                                    "content": [{"type": "text", "text": f"Error executing claude_code: {str(e)}"}],
+                                    "isError": True
+                                }
+                            }
+                    else:
+                        # Try to find and execute the tool from the MCP server
+                        tool_found = False
+                        
+                        if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, '_tools'):
+                            tools_dict = mcp_server._tool_manager._tools
+                            if tool_name in tools_dict:
+                                tool = tools_dict[tool_name]
+                                logger.info(f"Found tool {tool_name}: {tool}")
+                                logger.info(f"Tool attributes: fn={hasattr(tool, 'fn')}, handler={hasattr(tool, 'handler')}")
+                                try:
+                                    # Try different ways to get the actual function
+                                    tool_fn = None
+                                    if hasattr(tool, 'handler') and callable(tool.handler):
+                                        tool_fn = tool.handler
+                                    elif hasattr(tool, 'fn') and callable(tool.fn):
+                                        tool_fn = tool.fn
+                                    elif callable(tool):
+                                        tool_fn = tool
+                                    
+                                    if tool_fn:
+                                        # Use the context we set up for this request
+                                        try:
+                                            from fastmcp.server.dependencies import get_context
+                                            mock_ctx = get_context()
+                                        except ImportError:
+                                            # If get_context is not available, create a mock context
+                                            mock_ctx = type('MockContext', (), {'session_id': f"session_{request_id}"})()  
+                                        
+                                        # Get the tool function signature to determine required arguments
+                                        import inspect
+                                        sig = inspect.signature(tool_fn)
+                                        logger.info(f"Tool function signature: {sig}")
+                                        
+                                        # Check if this is a wrapped tool function that expects kwargs
+                                        # The mcp_claude_code tools use a different pattern
+                                        if 'kwargs' in sig.parameters or all(
+                                            param.kind == inspect.Parameter.VAR_KEYWORD 
+                                            for param in sig.parameters.values()
+                                        ):
+                                            # This is a **kwargs style function, pass arguments directly
+                                            logger.info("Using kwargs style call")
+                                            tool_result = await tool_fn(**arguments)
+                                        else:
+                                            # Prepare arguments based on function signature
+                                            call_args = {}
+                                            for param_name, param in sig.parameters.items():
+                                                if param_name == 'ctx':
+                                                    call_args[param_name] = mock_ctx
+                                                elif param_name in arguments:
+                                                    call_args[param_name] = arguments[param_name]
+                                                elif param.default != inspect.Parameter.empty:
+                                                    # Use default value if available
+                                                    call_args[param_name] = param.default
+                                                else:
+                                                    # Required parameter not provided, set reasonable defaults
+                                                    if param_name == 'session_id':
+                                                        call_args[param_name] = f"session_{request_id}"
+                                                    elif param_name == 'offset':
+                                                        call_args[param_name] = 0
+                                                    elif param_name == 'limit':
+                                                        call_args[param_name] = None
+                                                    elif param_name == 'expected_replacements':
+                                                        call_args[param_name] = 1
+                                                    elif param_name == 'time_out':
+                                                        call_args[param_name] = 30
+                                                    elif param_name == 'is_input':
+                                                        call_args[param_name] = False
+                                                    elif param_name == 'blocking':
+                                                        call_args[param_name] = False
+                                                    elif param_name == 'depth':
+                                                        call_args[param_name] = 3
+                                                    elif param_name == 'include_filtered':
+                                                        call_args[param_name] = False
+                                                    elif param_name == 'path':
+                                                        call_args[param_name] = arguments.get('path', '.')
+                                                    elif param_name == 'command':
+                                                        call_args[param_name] = arguments.get('command', '')
+                                                    # Add other common defaults as needed
+                                            
+                                            logger.info(f"Calling with args: {call_args}")
+                                            tool_result = await tool_fn(**call_args)
+                                        
+                                        # Format result appropriately
+                                        if hasattr(tool_result, 'content'):
+                                            result_content = tool_result.content
+                                        elif isinstance(tool_result, list):
+                                            result_content = tool_result
+                                        else:
+                                            result_content = [{"type": "text", "text": str(tool_result)}]
+                                        
+                                        response = {
+                                            "jsonrpc": "2.0",
+                                            "id": request_id,
+                                            "result": {
+                                                "content": result_content,
+                                                "isError": False
+                                            }
+                                        }
+                                        tool_found = True
+                                    else:
+                                        logger.error(f"Could not find callable function for tool {tool_name}")
+                                        response = {
+                                            "jsonrpc": "2.0",
+                                            "id": request_id,
+                                            "result": {
+                                                "content": [{"type": "text", "text": f"Error: Could not find callable function for tool {tool_name}"}],
+                                                "isError": True
+                                            }
+                                        }
+                                        tool_found = True
+                                except Exception as e:
+                                    logger.error(f"Tool {tool_name} execution error: {e}")
+                                    response = {
+                                        "jsonrpc": "2.0",
+                                        "id": request_id,
+                                        "result": {
+                                            "content": [{"type": "text", "text": f"Error executing {tool_name}: {str(e)}"}],
+                                            "isError": True
+                                        }
+                                    }
+                                    tool_found = True
+                        
+                        if not tool_found:
+                            response = {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"Tool not found: {tool_name}"
+                                }
+                            }
+                else:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Method not found: {method}"
+                        }
+                    }
+                
+                # Return as JSON response instead of SSE for better compatibility  
+                return JSONResponse(response)
+                    
+            except Exception as e:
+                logger.error(f"MCP request error: {e}")
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": request_data.get("id", "error") if 'request_data' in locals() else "error",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {str(e)}"
+                    }
+                }
+                
+                return JSONResponse(error_response, status_code=500)
+        
         # Use the MCP app's lifespan to ensure proper initialization
-        mcp_lifespan = getattr(mcp_app, 'lifespan', None)
+        mcp_lifespan = None  # No app lifespan needed for fallback
         
         # Create the Starlette app with OAuth routes and MCP mounted at custom path
         app = Starlette(
@@ -820,8 +779,8 @@ Returns:
                 # Health endpoint
                 Route("/health", health_check, methods=["GET"]),
                 
-                # Mount MCP app at the specified path
-                Mount(path, mcp_app),
+                # Add MCP endpoint directly as a route  
+                Route(path, handle_mcp_request, methods=["POST"]),
             ],
             lifespan=mcp_lifespan,
         )
