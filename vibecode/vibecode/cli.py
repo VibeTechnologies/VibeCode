@@ -165,13 +165,14 @@ def run_mcp_server(port: int, path: str, enable_auth: bool = True) -> None:
         sys.exit(1)
 
 
-def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str, subprocess.Popen]:
+def start_tunnel(local_url: str, tunnel_name: Optional[str] = None, max_retries: int = 3) -> Tuple[str, subprocess.Popen]:
     """
     Runs cloudflared tunnel and returns the publicly accessible URL.
     
     Args:
         local_url: The local URL to tunnel (e.g., http://localhost:8300/path)
         tunnel_name: Optional named tunnel to use (requires Cloudflare account setup)
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         Tuple of (public_url, process)
@@ -215,51 +216,93 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         
         return public_url, process
     else:
-        # Use quick tunnel (random domain)
-        print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
-        process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,  # Line buffered
-        )
+        # Use quick tunnel (random domain) with retry logic
+        last_error = None
         
-        public_url = None
-        # Parse stdout to find the assigned URL
-        # Updated pattern to handle cloudflared's output format with pipes and spaces
-        url_pattern = re.compile(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
-        
-        # Give cloudflared more time to start and output the URL
-        start_time = time.time()
-        timeout = 60  # Increased to 60 seconds timeout for better reliability
-        
-        while time.time() - start_time < timeout:
-            line = process.stdout.readline()
-            if not line:
-                if process.poll() is not None:
-                    # Process terminated
-                    break
-                # Continue reading - cloudflared might be slow to output
-                time.sleep(0.1)
-                continue
-                
-            # Print cloudflared output for debugging
-            print(f"[cloudflared] {line.strip()}", file=sys.stderr)
+        for attempt in range(max_retries):
+            if attempt > 0:
+                print(f"🔄 Retrying tunnel creation (attempt {attempt + 1}/{max_retries})...", file=sys.stderr)
+                time.sleep(2 * attempt)  # Exponential backoff: 2s, 4s, 6s...
             
-            if not public_url:
-                # Check for URL in the line (handles cloudflared's pipe-bordered format)
-                match = url_pattern.search(line)
-                if match:
-                    public_url = match.group(0)
-                    print(f"✅ Found tunnel URL: {public_url}", file=sys.stderr)
+            print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
+            process = subprocess.Popen(
+                [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line buffered
+            )
+            
+            public_url = None
+            rate_limited = False
+            error_detected = False
+            
+            # Parse stdout to find the assigned URL
+            # Updated pattern to handle cloudflared's output format with pipes and spaces
+            url_pattern = re.compile(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
+            
+            # Give cloudflared more time to start and output the URL
+            start_time = time.time()
+            timeout = 60  # Increased to 60 seconds timeout for better reliability
+            
+            while time.time() - start_time < timeout:
+                line = process.stdout.readline()
+                if not line:
+                    if process.poll() is not None:
+                        # Process terminated
+                        break
+                    # Continue reading - cloudflared might be slow to output
+                    time.sleep(0.1)
+                    continue
+                    
+                # Print cloudflared output for debugging
+                print(f"[cloudflared] {line.strip()}", file=sys.stderr)
+                
+                # Check for rate limiting
+                if "429 Too Many Requests" in line or "Too Many Requests" in line:
+                    rate_limited = True
+                    print("⚠️  Cloudflare rate limiting detected", file=sys.stderr)
                     break
-        
-        if not public_url:
+                
+                # Check for other errors
+                if "ERR" in line and ("error code" in line or "failed to" in line):
+                    error_detected = True
+                    last_error = line.strip()
+                
+                if not public_url:
+                    # Check for URL in the line (handles cloudflared's pipe-bordered format)
+                    match = url_pattern.search(line)
+                    if match:
+                        public_url = match.group(0)
+                        print(f"✅ Found tunnel URL: {public_url}", file=sys.stderr)
+                        return public_url, process
+            
+            # If we get here, this attempt failed
             process.terminate()
-            raise RuntimeError("Failed to obtain Cloudflare quick tunnel URL within timeout")
+            
+            if rate_limited:
+                if attempt < max_retries - 1:
+                    print(f"🕐 Rate limited, waiting before retry...", file=sys.stderr)
+                    continue
+                else:
+                    print("❌ Maximum retries reached due to rate limiting", file=sys.stderr)
+                    print("💡 Consider using a persistent tunnel: vibecode setup", file=sys.stderr)
+                    raise RuntimeError("Cloudflare quick tunnel rate limited - use 'vibecode setup' for persistent domain")
+            elif error_detected:
+                if attempt < max_retries - 1:
+                    print(f"🔄 Error detected, retrying: {last_error}", file=sys.stderr)
+                    continue
+                else:
+                    raise RuntimeError(f"Failed to create tunnel after {max_retries} attempts. Last error: {last_error}")
+            else:
+                if attempt < max_retries - 1:
+                    print(f"⏰ Timeout waiting for tunnel URL, retrying...", file=sys.stderr)
+                    continue
+                else:
+                    raise RuntimeError(f"Failed to obtain Cloudflare quick tunnel URL within timeout after {max_retries} attempts")
         
-        return public_url, process
+        # This should not be reached, but just in case
+        raise RuntimeError("Failed to create tunnel after all retry attempts")
 
 
 def get_tunnel_domain(cloudflared_cmd: str, tunnel_name: str) -> Optional[str]:
@@ -658,7 +701,29 @@ def main() -> None:
                         public_url, tunnel_process = start_tunnel(base_local_url, tunnel_name=None)
                         
             except Exception as e:
-                print(f"Error starting Cloudflare tunnel: {e}", file=sys.stderr)
+                error_msg = str(e)
+                print(f"Error starting Cloudflare tunnel: {error_msg}", file=sys.stderr)
+                
+                # Provide helpful guidance based on error type
+                if "rate limited" in error_msg.lower():
+                    print("\n🚨 Cloudflare Quick Tunnels Rate Limit Reached", file=sys.stderr)
+                    print("   Quick tunnels have usage limits and may be temporarily unavailable.", file=sys.stderr)
+                    print("\n💡 Solutions:", file=sys.stderr)
+                    print("   1. Wait a few minutes and try again", file=sys.stderr)
+                    print("   2. Set up a persistent tunnel (recommended):", file=sys.stderr)
+                    print("      cloudflared tunnel login", file=sys.stderr)
+                    print("      vibecode start", file=sys.stderr)
+                    print("   3. Use local mode for development:", file=sys.stderr)
+                    print("      vibecode start --no-tunnel", file=sys.stderr)
+                elif "not found" in error_msg.lower() and "cloudflared" in error_msg.lower():
+                    print("\n💡 Install cloudflared:", file=sys.stderr)
+                    print("   macOS: brew install cloudflared", file=sys.stderr)
+                    print("   Or visit: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation", file=sys.stderr)
+                else:
+                    print("\n💡 Try these alternatives:", file=sys.stderr)
+                    print("   • Local mode: vibecode start --no-tunnel", file=sys.stderr)
+                    print("   • Setup guide: vibecode setup", file=sys.stderr)
+                
                 sys.exit(1)
             
             full_public_url = f"{public_url}{uuid_path}"
