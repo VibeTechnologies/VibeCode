@@ -26,10 +26,20 @@ The system implements OAuth 2.1 with these endpoints:
 
 ### Tunnel Strategy
 
-Automatic tunnel selection based on authentication status:
+Automatic tunnel selection based on authentication status with persistence support:
 1. **Persistent tunnels**: Creates stable `vibecode-{timestamp}.cfargotunnel.com` domains when authenticated
 2. **Quick tunnels**: Falls back to random `*.trycloudflare.com` domains
 3. **Local mode**: `--no-tunnel` for development
+4. **Tunnel Persistence**: Automatically reuses existing tunnel processes across MCP server restarts
+
+#### Tunnel Persistence Features
+
+- **Process Tracking**: Saves tunnel process PID and URL to `.vibecode.json`
+- **Smart Reuse**: Automatically detects and reuses running tunnel processes
+- **Process Validation**: Checks if saved tunnel process is still alive before reuse
+- **Graceful Fallback**: Creates new tunnel if existing process is not accessible
+- **Manual Control**: Commands to check status (`vibecode tunnel status`) and stop tunnels (`vibecode tunnel stop`)
+- **Configuration Options**: `--no-reuse` flag to force creation of new tunnels
 
 ### Available Tools
 
@@ -88,6 +98,11 @@ vibecode start --no-tunnel --port 8300
 
 # Use specific tunnel
 vibecode start --tunnel my-tunnel-name
+
+# Tunnel management commands
+vibecode tunnel status    # Check current tunnel status
+vibecode tunnel stop      # Stop running tunnel
+vibecode start --no-reuse # Force new tunnel (skip reuse)
 ```
 
 ### Testing

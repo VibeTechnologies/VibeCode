@@ -123,13 +123,19 @@ Claude will then:
 
 ```bash
 # Main command (automatically uses persistent domain if available)
-vibecode start                   # Smart tunnel selection
+vibecode start                   # Smart tunnel selection with reuse
 
 # Options
 vibecode start --quick           # Force quick tunnel (random domain)
 vibecode start --no-tunnel      # Local only
 vibecode start --port 9000      # Custom port
 vibecode start --reset-uuid     # Generate new session UUID (new MCP URL path)
+vibecode start --no-reuse       # Don't reuse existing tunnels, create new ones
+
+# Tunnel management
+vibecode tunnel status           # Show current tunnel status
+vibecode tunnel stop            # Stop running tunnel
+vibecode tunnel list            # List available named tunnels
 
 # Setup
 vibecode setup                  # One-time setup guide
@@ -145,8 +151,10 @@ vibecode start  # → https://abc-random.trycloudflare.com (changes each time)
 **With one-time setup** (recommended):
 ```bash
 cloudflared tunnel login         # One time only
-vibecode start                   # → https://vibecode-123456.cfargotunnel.com (same every time)
+vibecode start                   # → https://vibecode-123456.cfargotunnel.com.yourdomain.app (same every time)
 ```
+
+**Note**: Persistent tunnels use domains like `tunnel-name.cfargotunnel.com.yourdomain.app` rather than just `tunnel-name.cfargotunnel.com`. VibeCode automatically detects and configures the correct domain.
 
 VibeCode automatically:
 - ✅ Detects if you're authenticated with Cloudflare
@@ -240,6 +248,41 @@ vibecode start --reset-uuid  # → generates new UUID, saves to .vibecode.json
 - `.vibecode.json` is automatically created in your current working directory
 - The file is ignored by git (added to .gitignore) to avoid committing session data
 - Each project directory can have its own `.vibecode.json` with a unique UUID
+
+### Tunnel Persistence
+
+VibeCode now supports tunnel persistence, allowing you to restart the MCP server without losing your tunnel connection.
+
+**Benefits**:
+- 🔄 **Tunnel Reuse**: Automatically reuses existing tunnel processes when restarting
+- ⚡ **Faster Startup**: Skip tunnel creation when one is already running
+- 🛡️ **Process Management**: Track and manage tunnel processes efficiently
+- 🔧 **Manual Control**: Stop, status check, and manage tunnels independently
+
+**How it works**:
+```bash
+# First run - creates tunnel and saves process info
+vibecode start  # → Creates tunnel, saves PID and URL to .vibecode.json
+
+# MCP server crashes or is stopped - tunnel keeps running
+# Restart server - automatically reuses existing tunnel
+vibecode start  # → Detects existing tunnel, reuses it
+
+# Check tunnel status
+vibecode tunnel status  # → Shows tunnel URL, PID, and running status
+
+# Stop tunnel manually
+vibecode tunnel stop   # → Stops tunnel process and clears saved info
+
+# Force new tunnel (skip reuse)
+vibecode start --no-reuse  # → Creates new tunnel even if one exists
+```
+
+**Smart Reuse Logic**:
+- Automatically detects if saved tunnel process is still running
+- Validates tunnel accessibility before reuse
+- Falls back to creating new tunnel if existing one is not accessible
+- Works with both quick tunnels and persistent/named tunnels
 
 ## Troubleshooting
 
