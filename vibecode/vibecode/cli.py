@@ -146,8 +146,8 @@ def run_mcp_server(port: int, path: str, enable_auth: bool = True) -> None:
             )
             
             # Run with SSE transport and OAuth authentication
-            # Bind to 127.0.0.1 to ensure cloudflared can connect to localhost
-            server.run_sse_with_auth(host="127.0.0.1", port=port, path=path)
+            # Bind to 0.0.0.0 to ensure cloudflared can connect from any interface
+            server.run_sse_with_auth(host="0.0.0.0", port=port, path=path)
         else:
             # Fallback to basic MCP server without authentication
             server = ClaudeCodeServer(
@@ -157,8 +157,8 @@ def run_mcp_server(port: int, path: str, enable_auth: bool = True) -> None:
             )
             
             # Run with SSE transport and custom parameters
-            # Bind to 127.0.0.1 to ensure cloudflared can connect to localhost
-            server.mcp.run(transport="sse", host="127.0.0.1", port=port, path=path)
+            # Bind to 0.0.0.0 to ensure cloudflared can connect from any interface
+            server.mcp.run(transport="sse", host="0.0.0.0", port=port, path=path)
         
     except Exception as e:
         print(f"Error running MCP server: {e}", file=sys.stderr)
@@ -202,7 +202,7 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         # Use named tunnel (persistent domain)
         print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url, "run", tunnel_name],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--protocol", "h2mux", "--url", local_url, "run", tunnel_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -218,7 +218,7 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         # Use quick tunnel (random domain)
         print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--protocol", "h2mux", "--url", local_url],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -613,7 +613,8 @@ def main() -> None:
             # Start Cloudflare tunnel
             # NOTE: cloudflared should tunnel to the base server URL, not the UUID path
             # The UUID path is handled by our server internally
-            base_local_url = f"http://localhost:{args.port}"
+            # Use 127.0.0.1 to match the server binding address
+            base_local_url = f"http://127.0.0.1:{args.port}"
             
             try:
                 # Determine tunnel strategy
