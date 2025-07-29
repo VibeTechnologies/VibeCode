@@ -202,7 +202,7 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         # Use named tunnel (persistent domain)
         print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--protocol", "h2mux", "--url", local_url, "run", tunnel_name],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url, "run", tunnel_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -218,7 +218,7 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         # Use quick tunnel (random domain)
         print(f"Starting cloudflared with URL: {local_url}", file=sys.stderr)
         process = subprocess.Popen(
-            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--protocol", "h2mux", "--url", local_url],
+            [cloudflared_cmd, "tunnel", "--no-autoupdate", "--url", local_url],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -227,11 +227,12 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
         
         public_url = None
         # Parse stdout to find the assigned URL
+        # Updated pattern to handle cloudflared's output format with pipes and spaces
         url_pattern = re.compile(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
         
-        # Give cloudflared some time to start and output the URL
+        # Give cloudflared more time to start and output the URL
         start_time = time.time()
-        timeout = 30  # 30 seconds timeout
+        timeout = 60  # Increased to 60 seconds timeout for better reliability
         
         while time.time() - start_time < timeout:
             line = process.stdout.readline()
@@ -239,15 +240,19 @@ def start_tunnel(local_url: str, tunnel_name: Optional[str] = None) -> Tuple[str
                 if process.poll() is not None:
                     # Process terminated
                     break
+                # Continue reading - cloudflared might be slow to output
+                time.sleep(0.1)
                 continue
                 
             # Print cloudflared output for debugging
             print(f"[cloudflared] {line.strip()}", file=sys.stderr)
             
             if not public_url:
+                # Check for URL in the line (handles cloudflared's pipe-bordered format)
                 match = url_pattern.search(line)
                 if match:
                     public_url = match.group(0)
+                    print(f"✅ Found tunnel URL: {public_url}", file=sys.stderr)
                     break
         
         if not public_url:
