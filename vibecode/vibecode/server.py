@@ -124,7 +124,7 @@ Returns:
         logger.info("Initializing MCP server endpoint")
         
         # Try to use the real FastMCP server first, fallback to our custom implementation
-        use_fallback = False
+        use_fallback = True  # Force fallback for now due to path issues
         
         if not use_fallback:
             # Try to use the real FastMCP SSE server
@@ -134,9 +134,15 @@ Returns:
                 from starlette.responses import JSONResponse
                 import uvicorn
                 
-                # Get the FastMCP SSE app and try to run it properly with context
-                fastmcp_app = mcp_server.sse_app
-                logger.info("Attempting to use FastMCP SSE app")
+                # Get the FastMCP HTTP app (recommended over deprecated sse_app)
+                try:
+                    # Try the modern http_app first
+                    fastmcp_app = mcp_server.http_app
+                    logger.info("Using FastMCP HTTP app")
+                except AttributeError:
+                    # Fallback to sse_app if http_app not available
+                    fastmcp_app = mcp_server.sse_app()  # Call the method to get the app
+                    logger.info("Using FastMCP SSE app (deprecated)")
                 
                 # Create OAuth endpoint handlers (same as before)
                 async def oauth_auth_server_metadata(request):
@@ -294,14 +300,27 @@ Returns:
                 """Handle MCP JSON-RPC requests."""
                 try:
                     request_data = await request.json()
+                except Exception as e:
+                    # Return proper HTTP error for malformed JSON
+                    logger.error(f"JSON parsing error: {e}")
+                    return JSONResponse(
+                        {"error": "Invalid JSON", "message": str(e)},
+                        status_code=400
+                    )
+                
+                try:
                     method = request_data.get("method", "")
                     request_id = request_data.get("id", "unknown")
                     
                     # Set up the MCP context for this request
-                    from fastmcp.server.dependencies import set_context
-                    from fastmcp import Context
-                    ctx = Context(mcp_server)
-                    set_context(ctx)
+                    try:
+                        from fastmcp.server.dependencies import set_context
+                        from fastmcp import Context
+                        ctx = Context(mcp_server)
+                        set_context(ctx)
+                    except ImportError:
+                        # Context setup not available, continue without it
+                        pass
                     
                     # Log MCP request with essential info only
                     logger.info(f"MCP {method} (id: {request_id})")
@@ -510,7 +529,12 @@ Returns:
                                         
                                         if tool_fn:
                                             # Use the context we set up for this request
-                                            mock_ctx = get_context()
+                                            try:
+                                                from fastmcp.server.dependencies import get_context
+                                                mock_ctx = get_context()
+                                            except ImportError:
+                                                # If get_context is not available, create a mock context
+                                                mock_ctx = type('MockContext', (), {'session_id': f"session_{request_id}"})()  
                                             
                                             # Get the tool function signature to determine required arguments
                                             import inspect
