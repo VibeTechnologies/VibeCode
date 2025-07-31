@@ -239,7 +239,7 @@ def test_comprehensive_oauth_endpoints():
 
 
 def test_mcp_endpoint_functionality():
-    """Test MCP endpoint functionality and proper SSE headers."""
+    """Test MCP endpoint functionality and proper JSON response."""
     with run_test_server(8341) as (base_url, test_uuid):
         
         print(f"🧪 Testing MCP endpoint functionality on {base_url}")
@@ -250,7 +250,7 @@ def test_mcp_endpoint_functionality():
             timeout=10,
             headers={
                 "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
+                "Accept": "application/json"
             },
             json={"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {}}
         )
@@ -258,18 +258,18 @@ def test_mcp_endpoint_functionality():
         print(f"MCP endpoint response status: {mcp_response.status_code}")
         print(f"MCP endpoint response headers: {dict(mcp_response.headers)}")
         
-        # Should get 200 OK with proper SSE response
+        # Should get 200 OK with proper JSON response
         assert mcp_response.status_code == 200, f"MCP endpoint failed: {mcp_response.status_code}"
         
-        # Check for SSE headers
+        # Check for JSON headers (compatible with Claude.ai MCP URL support)
         headers = mcp_response.headers
-        assert "text/event-stream" in headers.get("content-type", ""), "Should have SSE content-type"
+        assert "application/json" in headers.get("content-type", ""), "Should have JSON content-type for Claude.ai compatibility"
         
         # Should have MCP session ID if using real MCP server
         if "mcp-session-id" in headers:
             print("✅ MCP session ID header present")
         
-        print("✅ MCP Endpoint - 200 OK with proper SSE headers")
+        print("✅ MCP Endpoint - 200 OK with proper JSON headers")
         
         # Test MCP endpoint with valid initialized request (no specific method needed)
         mcp_response2 = requests.post(

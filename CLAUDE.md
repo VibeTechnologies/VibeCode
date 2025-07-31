@@ -106,17 +106,33 @@ vibecode start --no-reuse # Force new tunnel (skip reuse)
 ```
 
 ### Testing
+
+**IMPORTANT: ALWAYS RUN TESTS DURING DEVELOPMENT**
+- Run tests between iterations to ensure nothing is broken
+- MANDATORY: Always run the end-to-end test before marking any task as complete
+
 ```bash
-# Run all tests
-pytest
+# Run all integration tests (main test suite)
+python -m pytest vibecode/tests/ -v
+
+# Run core integration tests (faster)
+python -m pytest vibecode/tests/test_integration.py -v
+
+# Run end-to-end comprehensive test (REQUIRED before completing tasks)
+python test_claude_code_integration.py
 
 # Run specific test
-pytest tests/test_integration.py::test_vibecode_local_mode
+pytest vibecode/tests/test_integration.py::test_vibecode_local_mode
 
 # Test CLI directly
 python -m vibecode.cli --help
 python -m vibecode.cli start --help
 ```
+
+**Test Running Policy:**
+1. **Between iterations**: Run `python -m pytest vibecode/tests/test_integration.py -v` to verify core functionality
+2. **Before task completion**: ALWAYS run `python test_claude_code_integration.py` for end-to-end validation
+3. **Full test suite**: Use `python -m pytest vibecode/tests/ -v` for comprehensive testing
 
 ### Code Quality
 ```bash
@@ -171,3 +187,26 @@ The `AuthenticatedMCPServer` wraps the base `ClaudeCodeServer` with:
 - **Process Management**: Daemon threads for MCP server, subprocess management for tunnels
 - **Configuration**: Environment-based with intelligent defaults
 - **Logging**: stderr for tunnel output, stdout for user instructions
+- **Testing**: Mandatory end-to-end testing before task completion to ensure system integrity
+
+## Development Workflow Requirements
+
+**CRITICAL: Testing is MANDATORY before completing any task**
+
+1. **During Development**: Run integration tests between iterations
+   ```bash
+   python -m pytest vibecode/tests/test_integration.py -v
+   ```
+
+2. **Before Task Completion**: ALWAYS run the end-to-end test
+   ```bash
+   python test_claude_code_integration.py
+   ```
+
+3. **Task is NOT complete** until the E2E test passes successfully
+
+This ensures that:
+- Core MCP server functionality works
+- Claude Code integration is intact  
+- All 17 tools are properly exposed
+- Server startup and communication protocols function correctly
